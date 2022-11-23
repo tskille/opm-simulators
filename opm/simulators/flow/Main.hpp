@@ -501,6 +501,7 @@ private:
             const bool init_from_restart_file = !EWOMS_GET_PARAM(PreTypeTag, bool, SchedRestart);
             const bool allRanksDbgPrtLog = EWOMS_GET_PARAM(PreTypeTag, bool,
                                                       EnableLoggingFalloutWarning);
+
             outputMode = setupLogging(mpiRank,
                                       deckFilename,
                                       outputDir,
@@ -546,6 +547,23 @@ private:
 #endif
             exitCode = EXIT_FAILURE;
             return false;
+        }
+
+        catch (const std::runtime_error& e)
+        {
+            std::string message(e.what());
+            message = message.substr(0, message.size() - 15);
+            message = message + "\nCheck that you have write permission to the file.\n\n";
+
+            std::cout  << message << " \n";
+            //std::cerr  << "what: " << e.what() << std::endl;
+
+#if HAVE_MPI
+            MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+#endif
+            exitCode = EXIT_FAILURE;
+            return false;
+            //std::exit(EXIT_FAILURE);
         }
 
         exitCode = EXIT_SUCCESS;

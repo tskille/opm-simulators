@@ -77,6 +77,8 @@
 #include <opm/simulators/utils/PartiallySupportedFlowKeywords.hpp>
 #include <opm/simulators/utils/UnsupportedFlowKeywords.hpp>
 
+#include <opm/input/eclipse/Parser/ParserKeywords/E.hpp>
+
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -211,13 +213,94 @@ namespace {
         wtestState = std::make_unique<Opm::WellTestState>();
     }
 
+    void
+    modifyDeckChkInit(const Opm::Parser&    parser,
+                      Opm::Deck&            deck) 
+    {
+        if (deck.hasKeyword("RESTART")){
+            std::cout << "\nModel initialization check does not make sens for restart runs. \n\n";
+             exit(1);
+        }
+        
+        float max_qo;
+        float max_qw;
+        float max_qg;
+
+        const auto us = deck.getActiveUnitSystem();
+
+        if (us.getType() == Opm::UnitSystem::UnitType::UNIT_TYPE_METRIC){
+            max_qo = 50.0;       
+            max_qo = 50.0;       
+            max_qo = 100000.0;   
+        }
+
+
+        auto equil_keyw = deck.get<Opm::ParserKeywords::EQUIL>().back();
+        int neql = equil_keyw.size();
+            
+        auto num_keyw = deck.size();
+        std::string search_keyw("SUMMARY");
+
+        if (!deck.hasKeyword("SUMMARY"))
+            search_keyw = "SCHEDULE";
+
+        auto found_keyw = [&search_keyw](const Opm::DeckKeyword& entry ) { return (entry.name() == search_keyw); };
+
+        auto it = std::find_if(deck.begin(), deck.end(), found_keyw);
+        int from_ind = std::distance(deck.begin(), it);
+
+        deck.remove_keywords(from_ind, num_keyw );
+
+        std::string deck_reg = "COPY\n 'EQLNUM' 'FIPEQL' /\n/\n";
+        
+        auto extra_reg_keyws = parser.parseString( deck_reg );
+            
+        search_keyw = "SOLUTION";
+        it = std::find_if(deck.begin(), deck.end(), found_keyw);
+            
+        int solution_keyw_ind = std::distance(deck.begin(), it);
+
+        deck.insertKeyword(std::move(extra_reg_keyws[0]), solution_keyw_ind);
+
+        std::string deck_smry_str = "SUMMARY\nTIMESTEP\nRPR__EQL\n/\n";
+            
+        std::string inter_reg_str;
+
+        for (int r1 = 0; r1 < (neql - 1); r1++)
+            for (int r2 = r1 + 1; r2 < neql; r2++)
+                inter_reg_str = inter_reg_str + " " + std::to_string(r1 + 1) + " " + std::to_string(r2 + 1) + " /\n"; 
+
+        inter_reg_str = inter_reg_str + "/\n";
+
+        deck_smry_str = deck_smry_str + "\nROFT_EQL\n";
+        deck_smry_str = deck_smry_str + inter_reg_str; 
+
+        deck_smry_str = deck_smry_str + "\nRGFT_EQL\n";
+        deck_smry_str = deck_smry_str + inter_reg_str; 
+        
+        deck_smry_str = deck_smry_str + "\nRWFT_EQL\n";
+        deck_smry_str = deck_smry_str + inter_reg_str; 
+
+        auto smry_keyws = parser.parseString( deck_smry_str );
+
+        for (auto& deck_keyw: smry_keyws)
+            deck.addKeyword(std::move(deck_keyw));
+
+        std::string deck_sched_str = "SCHEDULE\nTSTEP\n 15*1 /\n";
+        auto sched_keyws = parser.parseString( deck_sched_str );
+
+        for (auto& deck_keyw: sched_keyws)
+            deck.addKeyword(std::move(deck_keyw));
+    }                  
+
     Opm::Deck
     readDeckFile(const std::string&       deckFilename,
                  const bool               checkDeck,
                  const Opm::Parser&       parser,
                  const Opm::ParseContext& parseContext,
                  const bool               treatCriticalAsNonCritical,
-                 Opm::ErrorGuard&         errorGuard)
+                 Opm::ErrorGuard&         errorGuard,
+                 bool chkInitModel)
     {
         Opm::Deck deck(parser.parseFile(deckFilename, parseContext, errorGuard));
 
@@ -246,6 +329,12 @@ namespace {
             Opm::checkDeck(deck, parser, parseContext, errorGuard);
         }
 
+        if (chkInitModel){
+            std::cout << "\nModify deck for stability check \n\n";
+            modifyDeckChkInit(parser, deck);
+        }
+
+      
         return deck;
     }
 
@@ -362,7 +451,8 @@ namespace {
                       const bool                           keepKeywords,
                       const std::optional<int>&            outputInterval,
                       Opm::ErrorGuard&                     errorGuard,
-                      const bool                           slaveMode)
+                      const bool                           slaveMode,
+                      const bool                           chkModelInit)
     {
         OPM_TIMEBLOCK(readDeck);
 
@@ -374,11 +464,10 @@ namespace {
                       "or summaryConfig are not initialized");
         }
 
-        auto parser = Opm::Parser { python };
-        const auto deck = readDeckFile(deckFilename, checkDeck,
-                                       parser, *parseContext,
-                                       treatCriticalAsNonCritical,
-                                       errorGuard);
+
+        auto parser = Opm::Parser{};
+        const auto deck = readDeckFile(deckFilename, checkDeck, parser,
+                                       *parseContext, treatCriticalAsNonCritical, errorGuard, chkModelInit);
 
         if (eclipseState == nullptr) {
             OPM_TIMEBLOCK(createEclState);
@@ -792,7 +881,8 @@ void Opm::readDeck(Opm::Parallel::Communication    comm,
                    const bool                      checkDeck,
                    const bool                      keepKeywords,
                    const std::optional<int>&       outputInterval,
-                   const bool                      slaveMode)
+                   const bool                      slaveMode,
+                   const bool                      checkInitModel)
 {
     auto errorGuard = std::make_unique<ErrorGuard>();
     int parseSuccess = 1; // > 0 is success
@@ -821,7 +911,7 @@ void Opm::readDeck(Opm::Parallel::Communication    comm,
                          eclipseState, schedule, udqState, actionState, wtestState,
                          summaryConfig, std::move(python), initFromRestart,
                          checkDeck, treatCriticalAsNonCritical, lowActionParsingStrictness,
-                         keepKeywords, outputInterval, *errorGuard, slaveMode);
+                         keepKeywords, outputInterval, *errorGuard, slaveMode, checkInitModel);
 
             // Update schedule so that re-parsing after actions use same strictness
             assert(schedule);

@@ -350,6 +350,8 @@ void Main::readDeck(const std::string& deckFilename,
     if (output_param >= 0)
         outputInterval = output_param;
 
+    auto chkModelInit = Parameters::Get<Parameters::CheckModelInitialization>();
+
     Opm::readDeck(FlowGenericVanguard::comm(),
                   deckFilename,
                   eclipseState_,
@@ -366,7 +368,8 @@ void Main::readDeck(const std::string& deckFilename,
                   outputCout_,
                   keepKeywords,
                   outputInterval,
-                  slaveMode);
+                  slaveMode,
+                  chkModelInit);
 
     verifyValidCellGeometry(FlowGenericVanguard::comm(), *this->eclipseState_);
 

@@ -89,6 +89,8 @@ struct ZoltanPhgEdgeSizeThreshold { static constexpr auto value = 0.35; };
 
 struct ZoltanParams { static constexpr auto value = "graph"; };
 
+struct CheckModelInitialization { static constexpr auto value = false; };
+
 } // namespace Opm::Parameters
 
 namespace Opm {

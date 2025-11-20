@@ -25,6 +25,9 @@
 #include <opm/input/eclipse/EclipseState/EclipseState.hpp>
 #include <opm/input/eclipse/EclipseState/IOConfig/IOConfig.hpp>
 #include <opm/input/eclipse/EclipseState/InitConfig/InitConfig.hpp>
+#include <opm/io/eclipse/ExtESmry.hpp>
+#include <opm/io/eclipse/ESmry.hpp>
+
 
 #include <opm/models/utils/start.hh>
 
@@ -47,6 +50,7 @@
 #include <charconv>
 #include <cstddef>
 #include <memory>
+#include <algorithm>
 
 namespace Opm::Parameters {
 
@@ -272,6 +276,34 @@ namespace Opm {
 
                 // if run, do the actual work, else just initialize
                 int exitCode = (this->*runOrInitFunc)();
+                
+                auto chkModelInit = Parameters::Get<Parameters::CheckModelInitialization>();
+
+                if (chkModelInit){
+
+                    auto deckFilename = eclState().getIOConfig().fullBasePath();
+                    //auto outputDir = eclState().getIOConfig().getOutputDir();
+                    
+                    std::cout << "deckFilename: " << deckFilename << "\n\n";
+                    //std::cout << "outputDir   : " << outputDir << "\n\n";
+
+                    auto hasEsmry = Parameters::Get<Parameters::EnableEsmry>();
+
+                    int res;
+
+                    if (hasEsmry){
+                        Opm::EclIO::ExtESmry smry(deckFilename + ".ESMRY");
+                        res = check_init_results_(smry);
+                    } else {
+                        Opm::EclIO::ESmry smry(deckFilename + ".SMSPEC");
+                        res = check_init_results_(smry);
+                    }
+
+                    std::cout << "\nres = " << res << "\n\n";
+
+                }
+
+
                 if (cleanup) {
                     executeCleanup_();
                 }
@@ -443,6 +475,64 @@ namespace Opm {
                                                  R"(OutputExtraConvergenceInfo (--output-extra-convergence-info))",
                                                  eclState().getIOConfig().getOutputDir(),
                                                  eclState().getIOConfig().getBaseName());
+        }
+
+        // Check initialization results
+        template <typename T>
+        int check_init_results_(T& smry)
+        {
+            auto keyList = smry.keywordList("ROFT_EQL:*");
+            std::vector<std::tuple<int, int>> reg_list;
+
+            for (auto& key: keyList){
+                std::size_t p1 = key.find(":");
+                std::size_t p2 = key.find("-", p1);
+
+                int r1 = std::stod(key.substr(p1 + 1, p2 - p1 - 1));
+                int r2 = std::stod(key.substr(p2 + 1));
+
+                reg_list.push_back(std::make_tuple(r1, r2));
+            }
+
+            for (auto& element : reg_list){
+                int r1 = std::get<0>(element);
+                int r2 = std::get<1>(element);
+
+                std::string oil_key = "ROFT_EQL:" + std::to_string(r1) + "-" + std::to_string(r2);
+                std::string water_key = "RWFT_EQL:" + std::to_string(r1) + "-" + std::to_string(r2);
+                std::string gas_key = "RGFT_EQL:" + std::to_string(r1) + "-" + std::to_string(r2);
+
+                auto qo_vect = smry.get(oil_key);
+                auto qw_vect = smry.get(water_key);
+                auto qg_vect = smry.get(gas_key);
+
+                auto it_max_oil = std::max_element(qo_vect.begin(), qo_vect.end());
+                auto it_min_oil = std::min_element(qo_vect.begin(), qo_vect.end());
+
+                auto it_max_water = std::max_element(qw_vect.begin(), qw_vect.end());
+                auto it_min_water = std::min_element(qw_vect.begin(), qw_vect.end());
+
+                auto it_max_gas = std::max_element(qg_vect.begin(), qg_vect.end());
+                auto it_min_gas = std::min_element(qg_vect.begin(), qg_vect.end());
+
+                float max_qo = std::max(*it_max_oil, std::abs(*it_min_oil));
+                float max_qw = std::max(*it_max_water, std::abs(*it_min_water));
+                float max_qg = std::max(*it_max_gas, std::abs(*it_min_gas));
+
+                std::cout << "r1= " << r1 << " r2= " << r2;
+                std::cout << " max oil : " << max_qo;
+                std::cout << " max water : " << max_qw;
+                std::cout << " max gas : " << max_qg;
+                            //std::cout < " min: " << *it_min;
+
+
+
+                std::cout << "\n";
+
+            }
+
+
+            return 0;
         }
 
         // Run the simulator.

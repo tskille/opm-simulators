@@ -241,6 +241,10 @@ protected:
             outputDir = Parameters::Get<Parameters::OutputDir>();
         }
 
+        if ((Parameters::Get<Parameters::CheckModelInitialization>()) && (outputDir == "")) {
+            outputDir = "check_model_initialization";  
+        }
+
 #if HAVE_DAMARIS
         enableDamarisOutput_ = Parameters::Get<Parameters::EnableDamarisOutput>();
 
@@ -332,6 +336,8 @@ protected:
                            Opm::compileTimestamp());
             setupTime_ = externalSetupTimer.elapsed();
         }
+
+
         // readDeck() may throw std::runtime_error on parse failure.
         // These exceptions are synchronized across MPI ranks via comm.min()
         // inside readDeck(), so cooperative shutdown is safe — returning false
@@ -370,6 +376,12 @@ protected:
 #if HAVE_CUDA
     Opm::gpuistl::printDevice();
 #endif
+
+        //auto test = Parameters::Get<Parameters::CheckModelInitialization>();
+
+        if ((Parameters::Get<Parameters::CheckModelInitialization>()) && ( eclipseState_ )) {
+            eclipseState_->getIOConfig().setOutputDir(outputDir);
+        }
 
         exitCode = EXIT_SUCCESS;
         return true;

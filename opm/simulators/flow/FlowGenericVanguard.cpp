@@ -220,7 +220,7 @@ void FlowGenericVanguard::readDeck(const std::string& filename)
                   modelParams_.actionState_,
                   modelParams_.wtestState_,
                   modelParams_.eclSummaryConfig_,
-                  nullptr, "normal", "normal", "100", false, false, false, {}, /*slaveMode=*/false);
+                  nullptr, "normal", "normal", "100", false, false, false, {}, /*slaveMode=*/false, false);
     modelParams_.setupTime_ = setupTimer.stop();
 }
 
@@ -544,6 +544,8 @@ void FlowGenericVanguard::registerParameters_()
     // register here for the use in the tests without BlackoilModelParameters
     Parameters::Register<Parameters::UseMultisegmentWell>
         ("Use the well model for multi-segment wells instead of the one for single-segment wells");
+    Parameters::Register<Parameters::CheckModelInitialization>
+        ("Check model initialization and exit. Run model for 100 days and check inter-region-flows. Default is false.");
 }
 
 template void FlowGenericVanguard::registerParameters_<double>();
